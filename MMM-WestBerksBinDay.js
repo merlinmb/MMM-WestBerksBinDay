@@ -27,6 +27,7 @@ Module.register('MMM-WestBerksBinDay', {
     Log.info('Starting module: ' + this.name);
     this.sendSocketNotification('MMM-WESTBERKSBINDAY-CONFIG', this.config);
     this.nextPickups = [];
+    this.statusMessage = "Loading";
     this.getPickups();
     this.timer = null;
   },
@@ -35,6 +36,10 @@ Module.register('MMM-WestBerksBinDay', {
   getPickups: function () {
     clearTimeout(this.timer);
     this.timer = null;
+    if (!this.nextPickups.length || this.statusMessage) {
+      this.statusMessage = "Loading";
+      this.updateDom();
+    }
     this.sendSocketNotification("MMM-WESTBERKSBINDAY-GET", {
       instanceId: this.identifier,
       uprn: this.config.uprn,
@@ -51,8 +56,12 @@ Module.register('MMM-WestBerksBinDay', {
   },
 
   socketNotificationReceived: function (notification, payload) {
-    if (notification == "MMM-WESTBERKSBINDAY-RESPONSE" + this.identifier && payload.length > 0) {
+    if (notification == "MMM-WESTBERKSBINDAY-ERROR" + this.identifier) {
+      this.statusMessage = `Error: ${payload.message}`;
+      this.updateDom(1000);
+    } else if (notification == "MMM-WESTBERKSBINDAY-RESPONSE" + this.identifier) {
       this.nextPickups = payload;
+      this.statusMessage = payload.length > 0 ? null : "Not Available";
       Log.info(`MMM-WestBerksBinDays: socketNotificationReceived called nextPickupLength=${this.nextPickups.length}`);
 
       this.updateDom(1000);
@@ -67,7 +76,7 @@ Module.register('MMM-WestBerksBinDay', {
 
     //Switch for Legacy files
     switch (color) {
-      case 'Green Bin':
+      case 'Recycling':
         use.setAttributeNS("http://www.w3.org/1999/xlink", "href", this.file("binday_icons.svg#bin"));
         svg.setAttributeNS(null, "style", "fill: #00A651");
         break;
@@ -95,8 +104,8 @@ Module.register('MMM-WestBerksBinDay', {
     var wrapper = document.createElement("div");
     Log.info(`MMM-WestBerksBinDays: getDom called`);
 
-    if (this.nextPickups.length == 0) {
-      wrapper.innerHTML = this.translate("LOADING");
+    if (this.statusMessage) {
+      wrapper.textContent = this.statusMessage;
       wrapper.className = "dimmed light small";
       return wrapper;
     }
@@ -120,12 +129,12 @@ Module.register('MMM-WestBerksBinDay', {
       var today = moment().startOf("day");
       var pickUpDate = moment(pickup.pickupDate);
 
-      if (today.isSame(pickUpDate)) {
+      if (pickup.pickupDate=="Today" || today.isSame(pickUpDate)) {
         dateContainer.innerHTML = "Today";
       } else if (moment(today).add(1, "days").isSame(pickUpDate)) {
         dateContainer.innerHTML = "Tomorrow";
       } else if (moment(today).add(7, "days").isAfter(pickUpDate)) {
-        dateContainer.innerHTML = this.capFirst(pickUpDate.format("dddd"));
+        dateContainer.innerHTML = this.capFirst(pickUpDate.format("dddd, D MMM"));
       } else {
         dateContainer.innerHTML = this.capFirst(pickUpDate.format(this.config.dateFormat));
       }

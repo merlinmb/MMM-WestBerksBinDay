@@ -1,6 +1,6 @@
 .MMM-WestBerksBinDay .binday-container {
   line-height: 1.50;
-  font-size: 18px;
+  font-size: 16px;
   margin: 0;
   padding: 0;
   position: relative;
@@ -10,7 +10,7 @@
 .MMM-WestBerksBinDay .binday-container .binday-type {
   color: #FFF;
   white-space: nowrap;
-  line-height: 24px;
+  line-height: 22px;
 }
 
 .MMM-WestBerksBinDay .binday-container .binday-date {
@@ -18,7 +18,7 @@
   white-space: nowrap;
   position: absolute;
   left: 100px;
-  line-height: 24px;
+  line-height: 22px;
 }
 
 .MMM-WestBerksBinDay .binday-container .binday-icon-container {
@@ -26,7 +26,7 @@
   position: absolute;
   right: 0px;
   top: 4px;
-  line-height: 24px;
+  line-height: 22px;
 }
 
 .MMM-WestBerksBinDay .binday-container .binday-icon-container .binday-icon {

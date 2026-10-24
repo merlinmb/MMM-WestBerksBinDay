@@ -48,6 +48,7 @@ function convertStringToDate(dateString) {
 
   // Ensure the input string has three parts
   if (parts.length !== 3) {
+    return dateString;
     throw new Error('Invalid date string format. Expected format: "Weekday Day Month".');
   }
 
@@ -103,7 +104,7 @@ module.exports = NodeHelper.create({
     if (notification == "MMM-WESTBERKSBINDAY-CONFIG") {
       this.config = payload;
     } else if (notification == "MMM-WESTBERKSBINDAY-GET") {
-      if (this.schedule == null) {
+      if (this.schedule == null || this.schedule.length == 0) {
         // generate a random Id, required for the request post data♦
 
         self.schedule = [];
@@ -124,7 +125,18 @@ module.exports = NodeHelper.create({
 
               if (response.data) {
                 Log.info("MMM-WestBerksBinDays: socketNotificationReceived Response: ");
+                if (!response.data.result || typeof response.data.result !== "object") {
+                  var message = "West Berkshire API returned an unexpected response. The service may be under maintenance.";
+                  var responseSummary = typeof response.data === "string"
+                    ? response.data.replace(/\s+/g, " ").slice(0, 200)
+                    : JSON.stringify(response.data).slice(0, 200);
+                  Log.error(`MMM-WestBerksBinDays: ${message} HTTP ${response.status}; response: ${responseSummary}`);
+                  self.sendSocketNotification("MMM-WESTBERKSBINDAY-ERROR" + payload.instanceId, { message: message });
+                  return;
+                }
+
                 Log.info(JSON.stringify(response.data));
+                var matchedService = false;
 
                 for (var reskey in response.data.result) {
 
@@ -135,16 +147,35 @@ module.exports = NodeHelper.create({
                     Log.info(`result value: ${response.data.result[reskey]}`);
 
                     self.schedule.push({ ServiceName: reskey, nextDateText: response.data.result[reskey] });
+                    matchedService = true;
                   }
                 }
+
+                if (!matchedService) {
+                  var resultKeys = Object.keys(response.data.result).join(", ") || "<none>";
+                  var message = "West Berkshire API response did not contain the expected collection data.";
+                  Log.error(`MMM-WestBerksBinDays: ${message} Returned keys: ${resultKeys}`);
+                  self.sendSocketNotification("MMM-WESTBERKSBINDAY-ERROR" + payload.instanceId, { message: message });
+                  return;
+                }
+
                 self.getNextPickups(payload);
 
+              } else {
+                var message = "West Berkshire API returned an empty response.";
+                Log.error(`MMM-WestBerksBinDays: ${message}`);
+                self.sendSocketNotification("MMM-WESTBERKSBINDAY-ERROR" + payload.instanceId, { message: message });
               }
 
               if (response.description) { Log.info(response.description); }
               if (response.error) { Log.error(response.error); }
             }).catch(function (error) {
-              Log.error("MMM-WestBerksBinDays: socketNotificationReceived ");
+              var status = error.response && error.response.status;
+              var message = status
+                ? `West Berkshire API request failed with HTTP ${status}.`
+                : "Could not reach the West Berkshire API.";
+              Log.error(`MMM-WestBerksBinDays: ${message} ${error.message}`);
+              self.sendSocketNotification("MMM-WESTBERKSBINDAY-ERROR" + payload.instanceId, { message: message });
             });
 
           i++;
@@ -180,7 +211,7 @@ module.exports = NodeHelper.create({
         else if (element.ServiceName == payload.recyclingServiceName) {
           var greenPickup = {
             pickupDate: convertStringToDate(element.nextDateText),
-            pickupType: "Green Bin",
+            pickupType: "Recycling",
           };
           nextPickups.push(greenPickup);
         }
