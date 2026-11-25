@@ -28,8 +28,21 @@ Module.register('MMM-WestBerksBinDay', {
     this.sendSocketNotification('MMM-WESTBERKSBINDAY-CONFIG', this.config);
     this.nextPickups = [];
     this.statusMessage = "Loading";
-    this.getPickups();
     this.timer = null;
+    this.getPickups();
+  },
+
+  stop: function () {
+    clearTimeout(this.timer);
+    this.timer = null;
+  },
+
+  suspend: function () {
+    this.stop();
+  },
+
+  resume: function () {
+    this.getPickups();
   },
 
   // Get data from API passing the uprn
@@ -110,7 +123,7 @@ Module.register('MMM-WestBerksBinDay', {
       return wrapper;
     }
 
-    for (i = 0; i < this.nextPickups.length; i++) {
+    for (var i = 0; i < this.nextPickups.length; i++) {
 
       var pickup = this.nextPickups[i];
 

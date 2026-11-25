@@ -82,7 +82,7 @@ function convertStringToDate(dateString) {
 module.exports = NodeHelper.create({
   start: function () {
     console.log("Starting node_helper for module: " + this.name);
-    this.schedule = null;
+    this.pendingRequests = new Set();
   },
 
   getPickupMethodJSON: function (_method, _uprn) {
@@ -104,99 +104,59 @@ module.exports = NodeHelper.create({
     if (notification == "MMM-WESTBERKSBINDAY-CONFIG") {
       this.config = payload;
     } else if (notification == "MMM-WESTBERKSBINDAY-GET") {
-      if (this.schedule == null || this.schedule.length == 0) {
-        // generate a random Id, required for the request post data♦
+      if (this.pendingRequests.has(payload.instanceId)) {
+        return;
+      }
+      this.pendingRequests.add(payload.instanceId);
 
-        self.schedule = [];
-        var i = 0;
-        Log.info("MMM-WestBerksBinDays: socketNotificationReceived URL:       " + URL);
-        Log.info("MMM-WestBerksBinDays: socketNotificationReceived UPRN:      " + payload.uprn);
-        //Log.info("MMM-WestBerksBinDays: socketNotificationReceived Headers JSON: " + JSON.stringify(HEADERS));
+      var requests = Object.keys(json_payload_methods).map(function (key) {
+        var pickupJson = self.getPickupMethodJSON(json_payload_methods[key], payload.uprn);
+        return axios.post(URL, pickupJson, { headers: HEADERS, timeout: 15000 });
+      });
 
-        for (var __key in json_payload_methods) {
-          var __value = json_payload_methods[__key];
+      Promise.all(requests).then(function (responses) {
+        var schedule = [];
+        responses.forEach(function (response) {
+          if (!response.data || !response.data.result || typeof response.data.result !== "object") {
+            throw new Error("West Berkshire API returned an unexpected response.");
+          }
 
-          //Log.info("MMM-WestBerksBinDays: socketNotificationReceived Fetching:  " + __key + " using " + __value);
-          var __pickupjson = self.getPickupMethodJSON(__value, payload.uprn)
-          //Log.info("MMM-WestBerksBinDays: socketNotificationReceived Post JSON: " + JSON.stringify(__pickupjson));
+          Object.keys(response.data.result).forEach(function (reskey) {
+            if (reskey == payload.refuseServiceName ||
+              reskey == payload.recyclingServiceName ||
+              reskey == payload.foodWasteServiceName) {
+              schedule.push({ ServiceName: reskey, nextDateText: response.data.result[reskey] });
+            }
+          });
+        });
 
-          axios.post("https://www.westberks.gov.uk/apiserver/ajaxlibrary", __pickupjson, { headers: HEADERS })
-            .then(function (response) {
-
-              if (response.data) {
-                Log.info("MMM-WestBerksBinDays: socketNotificationReceived Response: ");
-                if (!response.data.result || typeof response.data.result !== "object") {
-                  var message = "West Berkshire API returned an unexpected response. The service may be under maintenance.";
-                  var responseSummary = typeof response.data === "string"
-                    ? response.data.replace(/\s+/g, " ").slice(0, 200)
-                    : JSON.stringify(response.data).slice(0, 200);
-                  Log.error(`MMM-WestBerksBinDays: ${message} HTTP ${response.status}; response: ${responseSummary}`);
-                  self.sendSocketNotification("MMM-WESTBERKSBINDAY-ERROR" + payload.instanceId, { message: message });
-                  return;
-                }
-
-                Log.info(JSON.stringify(response.data));
-                var matchedService = false;
-
-                for (var reskey in response.data.result) {
-
-                  if (reskey == payload.refuseServiceName ||
-                    reskey == payload.recyclingServiceName ||
-                    reskey == payload.foodWasteServiceName) {
-                    Log.info(`result key: ${reskey}`);
-                    Log.info(`result value: ${response.data.result[reskey]}`);
-
-                    self.schedule.push({ ServiceName: reskey, nextDateText: response.data.result[reskey] });
-                    matchedService = true;
-                  }
-                }
-
-                if (!matchedService) {
-                  var resultKeys = Object.keys(response.data.result).join(", ") || "<none>";
-                  var message = "West Berkshire API response did not contain the expected collection data.";
-                  Log.error(`MMM-WestBerksBinDays: ${message} Returned keys: ${resultKeys}`);
-                  self.sendSocketNotification("MMM-WESTBERKSBINDAY-ERROR" + payload.instanceId, { message: message });
-                  return;
-                }
-
-                self.getNextPickups(payload);
-
-              } else {
-                var message = "West Berkshire API returned an empty response.";
-                Log.error(`MMM-WestBerksBinDays: ${message}`);
-                self.sendSocketNotification("MMM-WESTBERKSBINDAY-ERROR" + payload.instanceId, { message: message });
-              }
-
-              if (response.description) { Log.info(response.description); }
-              if (response.error) { Log.error(response.error); }
-            }).catch(function (error) {
-              var status = error.response && error.response.status;
-              var message = status
-                ? `West Berkshire API request failed with HTTP ${status}.`
-                : "Could not reach the West Berkshire API.";
-              Log.error(`MMM-WestBerksBinDays: ${message} ${error.message}`);
-              self.sendSocketNotification("MMM-WESTBERKSBINDAY-ERROR" + payload.instanceId, { message: message });
-            });
-
-          i++;
+        if (schedule.length === 0) {
+          throw new Error("West Berkshire API response did not contain the expected collection data.");
         }
 
-
-      } else {
-        this.getNextPickups(payload);
-      }
+        self.getNextPickups(payload, schedule);
+      }).catch(function (error) {
+        var status = error.response && error.response.status;
+        var message = status
+          ? `West Berkshire API request failed with HTTP ${status}.`
+          : error.message || "Could not reach the West Berkshire API.";
+        Log.error(`MMM-WestBerksBinDays: ${message}`);
+        self.sendSocketNotification("MMM-WESTBERKSBINDAY-ERROR" + payload.instanceId, { message: message });
+      }).then(function () {
+        self.pendingRequests.delete(payload.instanceId);
+      });
     }
   },
 
 
 
 
-  getNextPickups: function (payload) {
+  getNextPickups: function (payload, schedule) {
     var nextPickups = [];
 
-    Log.info("MMM-WestBerksBinDays: getNextPickups Schedule Length=" + this.schedule.length);
-    for (let i = 0; i < this.schedule.length; i++) {
-      element = this.schedule[i];
+    Log.info("MMM-WestBerksBinDays: getNextPickups Schedule Length=" + schedule.length);
+    for (let i = 0; i < schedule.length; i++) {
+      var element = schedule[i];
       Log.info(`MMM-WestBerksBinDays: getNextPickups element.ServiceName = ${element.ServiceName}`);
       Log.info(`MMM-WestBerksBinDays: getNextPickups element.nextDateText = ${element.nextDateText}`);
 
